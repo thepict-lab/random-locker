@@ -1,0 +1,50 @@
+name: random_locker
+description: "신발장 배치기"
+publish_to: 'none'
+
+# x.y.z+N — installer/build-installer.ps1 이 이 줄을 읽어 설치 파일 이름과 버전을 정한다.
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+# 네이티브 플러그인은 쓰지 않는다 — Windows 에서 플러그인이 하나라도 있으면 빌드에
+# 심볼릭 링크(개발자 모드)가 필요해진다. 파일 대화상자는 dart:ffi 로 직접 부른다
+# (lib/core/utils/win_file_dialog.dart), 저장 위치는 %APPDATA% 를 쓴다.
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # 상태관리 · 라우팅 (PICTLAB PMS 와 같은 구성)
+  get: ^4.7.3
+
+  # 명단 가져오기 — 잔디 관리자 메뉴 등에서 받은 .xlsx
+  excel: ^4.0.6
+
+  # Windows 열기/저장 대화상자 (comdlg32)
+  ffi: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+  # 앱 아이콘 생성 (assets/icon/app_icon.png → windows/runner/resources/app_icon.ico)
+  flutter_launcher_icons: ^0.14.4
+
+# 앱 아이콘 — PICTLAB PMS 와 같은 PICT. 로고 (흰 바탕)
+flutter_launcher_icons:
+  android: false
+  ios: false
+  windows:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    icon_size: 256
+
+flutter:
+  uses-material-design: true
+
+  # 스플래시 로고 — PICTLAB PMS 의 lib/core/assets/thepict_logo_2.png
+  assets:
+    - assets/images/
