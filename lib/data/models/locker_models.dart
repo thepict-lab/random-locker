@@ -188,12 +188,12 @@ class LockerState {
 
   DateTime? lastShuffledAt;
 
-  /// 처음 실행 — 가로 4 × 세로 7, 가로 5 × 세로 8 두 세트
+  /// 처음 실행 — 가로 4 × 세로 7, 가로 5 × 세로 7 두 세트
   factory LockerState.initial() => LockerState(
         members: [],
         banks: [
           LockerBank(id: 'A', name: 'A', cols: 4, rows: 7),
-          LockerBank(id: 'B', name: 'B', cols: 5, rows: 8),
+          LockerBank(id: 'B', name: 'B', cols: 5, rows: 7),
         ],
         assignments: {},
         pinned: {},

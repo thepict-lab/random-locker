@@ -24,9 +24,9 @@ void main() {
     await dir.delete(recursive: true);
   });
 
-  test('처음 실행하면 4×7, 5×8 두 세트(68칸)', () {
-    expect(c.state.banks.map((b) => (b.cols, b.rows)), [(4, 7), (5, 8)]);
-    expect(c.totalSlots, 68);
+  test('처음 실행하면 4×7, 5×7 두 세트(63칸)', () {
+    expect(c.state.banks.map((b) => (b.cols, b.rows)), [(4, 7), (5, 7)]);
+    expect(c.totalSlots, 63);
   });
 
   test('랜덤 배치는 모든 사람을 서로 다른 칸에 넣는다', () {
@@ -41,13 +41,13 @@ void main() {
   test('고정 칸과 사용 안 함 칸은 랜덤 배치에서 지켜진다', () {
     c.addMembers(['가', '나', '다', '라']);
     final ga = c.state.members.first.id;
-    c.placeMember(ga, slotKey('B', 39));
-    c.togglePin(slotKey('B', 39));
+    c.placeMember(ga, slotKey('B', 34));
+    c.togglePin(slotKey('B', 34));
     c.toggleDisabled(slotKey('A', 0));
     for (var i = 0; i < 20; i++) {
       c.shuffle();
       c.skipReveal();
-      expect(c.memberAt(slotKey('B', 39)), ga);
+      expect(c.memberAt(slotKey('B', 34)), ga);
       expect(c.memberAt(slotKey('A', 0)), isNull);
     }
   });
@@ -74,7 +74,7 @@ void main() {
     c.setNumbering(NumberingOrder.columnMajor);
     c.setContinuousNumbering(true);
     expect(c.numberOf(b, 0), 29); // A 28칸 다음
-    expect(c.numberOf(b, 1), 29 + 8); // 오른쪽 칸은 한 줄(세로 8칸) 뒤
+    expect(c.numberOf(b, 1), 29 + 7); // 오른쪽 칸은 한 줄(세로 7칸) 뒤
   });
 
   test('크기를 바꿔도 남는 칸의 사람은 자리를 지킨다', () {
@@ -83,7 +83,7 @@ void main() {
     c.placeMember(id, slotKey('A', 5)); // 2행 2열 (cols 4)
     c.updateBanks([
       const BankEdit(id: 'A', name: 'A', cols: 3, rows: 7),
-      const BankEdit(id: 'B', name: 'B', cols: 5, rows: 8),
+      const BankEdit(id: 'B', name: 'B', cols: 5, rows: 7),
     ]);
     expect(c.memberAt(slotKey('A', 4)), id); // 2행 2열 (cols 3)
   });
@@ -96,7 +96,7 @@ void main() {
       c.replaceConditions([
         c.newCondition([])
           ..memberIds.addAll(target)
-          ..slots.addAll({...bottom, for (var i = 0; i < 40; i++) slotKey('B', i)}),
+          ..slots.addAll({...bottom, for (var i = 0; i < 35; i++) slotKey('B', i)}),
       ]);
       for (var round = 0; round < 30; round++) {
         final report = c.shuffle();
@@ -117,12 +117,12 @@ void main() {
         c.newCondition([])
           ..type = ConditionType.only
           ..memberIds.add(ga)
-          ..slots.addAll({'B:39', 'B:38'}),
+          ..slots.addAll({'B:34', 'B:33'}),
       ]);
       for (var round = 0; round < 20; round++) {
         c.shuffle();
         c.skipReveal();
-        expect({'B:39', 'B:38'}.contains(c.slotOf(ga)), isTrue);
+        expect({'B:34', 'B:33'}.contains(c.slotOf(ga)), isTrue);
       }
     });
 
@@ -178,7 +178,7 @@ void main() {
       c.replaceConditions([c.newCondition([])..slots.addAll({'A:5', 'A:3'})]);
       c.updateBanks([
         const BankEdit(id: 'A', name: 'A', cols: 3, rows: 7),
-        const BankEdit(id: 'B', name: 'B', cols: 5, rows: 8),
+        const BankEdit(id: 'B', name: 'B', cols: 5, rows: 7),
       ]);
       // A:5 (2행 2열) → A:4, A:3 (1행 4열) 은 잘려 나간다
       expect(c.state.conditions.single.slots, {'A:4'});

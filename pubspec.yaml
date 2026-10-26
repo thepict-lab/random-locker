@@ -3,7 +3,7 @@ description: "신발장 배치기"
 publish_to: 'none'
 
 # x.y.z+N — installer/build-installer.ps1 이 이 줄을 읽어 설치 파일 이름과 버전을 정한다.
-version: 1.0.1+2
+version: 1.0.2+3
 
 environment:
   sdk: ^3.12.2
