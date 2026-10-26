@@ -1,6 +1,8 @@
+import 'default_roster.dart';
+
 /// 등록된 사람
 class Member {
-  Member({required this.id, required this.name, this.excluded = false});
+  Member({required this.id, required this.name, this.excluded = false, this.teamId});
 
   final String id;
   String name;
@@ -8,12 +10,157 @@ class Member {
   /// 배치에서 뺀다 (휴가 · 외근 등) — 목록에는 남는다
   bool excluded;
 
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'excluded': excluded};
+  /// 소속 팀 — 없으면 null
+  String? teamId;
+
+  Map<String, dynamic> toJson() =>
+      {'id': id, 'name': name, 'excluded': excluded, 'team': ?teamId};
 
   factory Member.fromJson(Map<String, dynamic> json) => Member(
         id: json['id'] as String,
         name: json['name'] as String,
         excluded: json['excluded'] as bool? ?? false,
+        teamId: json['team'] as String?,
+      );
+}
+
+/// 팀 — 팀장이 추첨에 나가 영역을 고른다. 소속은 멤버의 [Member.teamId] 로 정한다.
+class Team {
+  Team({required this.id, required this.name, required this.color, this.leaderId});
+
+  final String id;
+  String name;
+
+  /// [AppColors.team] 의 번호
+  int color;
+
+  String? leaderId;
+
+  Map<String, dynamic> toJson() =>
+      {'id': id, 'name': name, 'color': color, 'leader': ?leaderId};
+
+  factory Team.fromJson(Map<String, dynamic> json) => Team(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? '팀',
+        color: json['color'] as int? ?? 0,
+        leaderId: json['leader'] as String?,
+      );
+}
+
+/// 영역 — 미리 묶어 둔 칸들. 추첨 순위대로 팀이 하나씩 가져간다.
+class LockerArea {
+  LockerArea({
+    required this.id,
+    required this.name,
+    required this.color,
+    Set<SlotKey>? slots,
+    this.teamId,
+  }) : slots = slots ?? <SlotKey>{};
+
+  final String id;
+  String name;
+  int color;
+  final Set<SlotKey> slots;
+
+  /// 이 영역을 가져간 팀
+  String? teamId;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'color': color,
+        'slots': slots.toList(),
+        'team': ?teamId,
+      };
+
+  factory LockerArea.fromJson(Map<String, dynamic> json) => LockerArea(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? '영역',
+        color: json['color'] as int? ?? 0,
+        slots: {...(json['slots'] as List? ?? const []).cast<String>()},
+        teamId: json['team'] as String?,
+      );
+
+  LockerArea copy() =>
+      LockerArea(id: id, name: name, color: color, slots: {...slots}, teamId: teamId);
+}
+
+/// 팀장 추첨 한 판 — 본선이거나, 동점 팀끼리의 재대결
+class DrawRound {
+  DrawRound({required this.teamIds, Map<String, List<int>>? picks, this.loadOrder, List<int>? drawn})
+      : picks = picks ?? {},
+        drawn = drawn ?? [];
+
+  /// 이 판에 나간 팀 (숫자를 고르는 순서)
+  final List<String> teamIds;
+
+  /// 팀 → 고른 숫자 5개
+  final Map<String, List<int>> picks;
+
+  /// 추첨기에 구슬을 넣은 순서 (구슬 번호). 이 순서가 시드라 같은 순서면 같은 결과가 나온다.
+  List<int>? loadOrder;
+
+  /// 나온 숫자 (나온 순서대로)
+  final List<int> drawn;
+
+  Map<String, dynamic> toJson() => {
+        'teams': teamIds,
+        'picks': picks,
+        'loadOrder': ?loadOrder,
+        'drawn': drawn,
+      };
+
+  factory DrawRound.fromJson(Map<String, dynamic> json) => DrawRound(
+        teamIds: (json['teams'] as List? ?? const []).cast<String>(),
+        picks: {
+          for (final e in (json['picks'] as Map? ?? const {}).entries)
+            e.key as String: (e.value as List).cast<int>(),
+        },
+        loadOrder: (json['loadOrder'] as List?)?.cast<int>(),
+        drawn: (json['drawn'] as List? ?? const []).cast<int>(),
+      );
+}
+
+/// 팀장 추첨 기록 — 본선과 재대결 판들, 그리고 지금까지의 순위
+class DrawRecord {
+  DrawRecord({
+    required this.teamIds,
+    List<DrawRound>? rounds,
+    List<List<String>>? standings,
+    DateTime? at,
+  })  : rounds = rounds ?? [],
+        standings = standings ?? [],
+        at = at ?? DateTime.now();
+
+  /// 추첨에 나간 팀
+  final List<String> teamIds;
+
+  /// 판 — 첫 판이 본선, 그 뒤는 재대결
+  final List<DrawRound> rounds;
+
+  /// 순위 묶음 (위에서부터). 둘 이상인 묶음은 아직 재대결이 남은 동점.
+  /// 본선이 끝나기 전에는 비어 있다.
+  final List<List<String>> standings;
+
+  final DateTime at;
+
+  Map<String, dynamic> toJson() => {
+        'teams': teamIds,
+        'rounds': rounds.map((r) => r.toJson()).toList(),
+        'standings': standings,
+        'at': at.toIso8601String(),
+      };
+
+  factory DrawRecord.fromJson(Map<String, dynamic> json) => DrawRecord(
+        teamIds: (json['teams'] as List? ?? const []).cast<String>(),
+        rounds: [
+          for (final r in json['rounds'] as List? ?? const [])
+            DrawRound.fromJson((r as Map).cast<String, dynamic>()),
+        ],
+        standings: [
+          for (final g in json['standings'] as List? ?? const []) (g as List).cast<String>(),
+        ],
+        at: DateTime.tryParse(json['at'] as String? ?? ''),
       );
 }
 
@@ -162,14 +309,24 @@ class LockerState {
     required this.assignments,
     required this.pinned,
     List<LockerCondition>? conditions,
+    List<Team>? teams,
+    List<LockerArea>? areas,
+    this.draw,
     this.fillMode = FillMode.scatter,
     this.numbering = NumberingOrder.rowMajor,
     this.continuousNumbering = false,
     this.lastShuffledAt,
-  }) : conditions = conditions ?? [];
+  })  : conditions = conditions ?? [],
+        teams = teams ?? [],
+        areas = areas ?? [];
 
   final List<Member> members;
   final List<LockerBank> banks;
+  final List<Team> teams;
+  final List<LockerArea> areas;
+
+  /// 가장 최근 팀장 추첨 (진행 중이거나 끝난 것)
+  DrawRecord? draw;
 
   /// 칸 → 사람 id
   final Map<SlotKey, String> assignments;
@@ -188,9 +345,12 @@ class LockerState {
 
   DateTime? lastShuffledAt;
 
-  /// 처음 실행 — 가로 4 × 세로 7, 가로 5 × 세로 7 두 세트
+  /// 처음 실행 — 가로 4 × 세로 7, 가로 5 × 세로 7 두 세트, 페인터 구성원 명단
   factory LockerState.initial() => LockerState(
-        members: [],
+        members: [
+          for (var i = 0; i < defaultRoster.length; i++)
+            Member(id: 'p${i + 1}', name: defaultRoster[i]),
+        ],
         banks: [
           LockerBank(id: 'A', name: 'A', cols: 4, rows: 7),
           LockerBank(id: 'B', name: 'B', cols: 5, rows: 7),
@@ -206,6 +366,9 @@ class LockerState {
         'assignments': assignments,
         'pinned': pinned.toList(),
         'conditions': conditions.map((c) => c.toJson()).toList(),
+        'teams': teams.map((t) => t.toJson()).toList(),
+        'areas': areas.map((a) => a.toJson()).toList(),
+        'draw': draw?.toJson(),
         'fillMode': fillMode.name,
         'numbering': numbering.name,
         'continuousNumbering': continuousNumbering,
@@ -228,6 +391,17 @@ class LockerState {
           for (final c in json['conditions'] as List? ?? const [])
             LockerCondition.fromJson((c as Map).cast<String, dynamic>()),
         ],
+        teams: [
+          for (final t in json['teams'] as List? ?? const [])
+            Team.fromJson((t as Map).cast<String, dynamic>()),
+        ],
+        areas: [
+          for (final a in json['areas'] as List? ?? const [])
+            LockerArea.fromJson((a as Map).cast<String, dynamic>()),
+        ],
+        draw: json['draw'] is Map
+            ? DrawRecord.fromJson((json['draw'] as Map).cast<String, dynamic>())
+            : null,
         fillMode: FillMode.values.asNameMap()[json['fillMode']] ?? FillMode.scatter,
         numbering: NumberingOrder.values.asNameMap()[json['numbering']] ??
             NumberingOrder.rowMajor,

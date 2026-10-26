@@ -4,6 +4,8 @@ import 'dart:math';
 
 import 'package:get/get.dart';
 
+import '../../core/theme/app_colors.dart';
+import '../../data/models/default_roster.dart';
 import '../../data/models/locker_models.dart';
 import '../../data/repository/locker_repository.dart';
 
@@ -66,6 +68,7 @@ class LockerController extends GetxController {
   late final Future<void> ready = _load();
 
   Map<String, SlotKey>? _slotOfMember;
+  Map<SlotKey, LockerArea>? _areaOfSlot;
 
   Future<void> _load() async {
     state = await _repository.load();
@@ -89,9 +92,40 @@ class LockerController extends GetxController {
 
   bool isPinned(SlotKey slot) => state.pinned.contains(slot);
 
-  /// 배치 조건으로 보아 [memberId] 를 [slot] 에 둘 수 있는가
+  Team? teamById(String? id) => id == null ? null : state.teams.firstWhereOrNull((t) => t.id == id);
+
+  List<Member> membersOf(String teamId) =>
+      state.members.where((m) => m.teamId == teamId).toList();
+
+  LockerArea? areaById(String? id) =>
+      id == null ? null : state.areas.firstWhereOrNull((a) => a.id == id);
+
+  LockerArea? areaOf(SlotKey slot) {
+    _areaOfSlot ??= {for (final a in state.areas) for (final s in a.slots) s: a};
+    return _areaOfSlot![slot];
+  }
+
+  /// [teamId] 가 가져간 영역
+  LockerArea? areaOfTeam(String teamId) =>
+      state.areas.firstWhereOrNull((a) => a.teamId == teamId);
+
+  /// 영역을 칠할 색 번호 — 팀이 가져갔으면 그 팀 색
+  int colorOfArea(LockerArea a) => teamById(a.teamId)?.color ?? a.color;
+
+  /// 영역에서 실제로 쓸 수 있는 칸 수 (사용 안 함 제외)
+  int usableSlotsOf(LockerArea area) => area.slots.where((s) => !isDisabled(s)).length;
+
+  /// 배치 조건과 팀 영역으로 보아 [memberId] 를 [slot] 에 둘 수 있는가
   bool isAllowed(String memberId, SlotKey slot) =>
-      !state.conditions.any((c) => c.forbids(memberId, slot));
+      areaAllows(memberId, slot) && !state.conditions.any((c) => c.forbids(memberId, slot));
+
+  /// 팀이 가져간 영역은 그 팀 사람만, 영역을 가진 팀의 사람은 그 영역 안에만
+  bool areaAllows(String memberId, SlotKey slot) {
+    final owner = areaOf(slot)?.teamId;
+    final team = memberById(memberId)?.teamId;
+    if (owner != null) return owner == team;
+    return team == null || areaOfTeam(team) == null;
+  }
 
   /// [memberId] 가 대상인 (켜진) 조건
   List<LockerCondition> conditionsOf(String memberId) => state.conditions
@@ -194,6 +228,9 @@ class LockerController extends GetxController {
     for (final c in state.conditions) {
       c.memberIds.remove(id);
     }
+    for (final t in state.teams) {
+      if (t.leaderId == id) t.leaderId = null;
+    }
     _changed();
   }
 
@@ -206,7 +243,190 @@ class LockerController extends GetxController {
     for (final c in state.conditions) {
       c.memberIds.clear();
     }
+    for (final t in state.teams) {
+      t.leaderId = null;
+    }
     _changed();
+  }
+
+  /// 페인터 구성원 기본 명단 — 없는 이름만 넣는다
+  int addDefaultRoster() => addMembers(defaultRoster);
+
+  // ───────────────────────── 팀 ─────────────────────────
+
+  Team addTeam([String? name]) {
+    _snapshot();
+    final used = state.teams.map((t) => t.color).toSet();
+    var color = 0;
+    while (used.contains(color) && color < AppColors.team.length) {
+      color++;
+    }
+    final team = Team(
+      id: _newId(),
+      name: (name ?? '').trim().isEmpty ? nextTeamName() : name!.trim(),
+      color: color % AppColors.team.length,
+    );
+    state.teams.add(team);
+    _changed();
+    return team;
+  }
+
+  /// 새 팀의 기본 이름 — 1팀, 2팀 …
+  String nextTeamName() {
+    final used = state.teams.map((t) => t.name).toSet();
+    var n = 1;
+    while (used.contains('$n팀')) {
+      n++;
+    }
+    return '$n팀';
+  }
+
+  void renameTeam(String id, String name) {
+    final t = teamById(id);
+    if (t == null || name.trim().isEmpty || t.name == name.trim()) return;
+    _snapshot();
+    t.name = name.trim();
+    _changed();
+  }
+
+  void setTeamColor(String id, int color) {
+    final t = teamById(id);
+    if (t == null) return;
+    _snapshot();
+    t.color = color;
+    _changed();
+  }
+
+  /// 팀을 지운다 — 소속 멤버는 소속 없음이 되고, 가져간 영역은 비워진다.
+  void removeTeam(String id) {
+    _snapshot();
+    state.teams.removeWhere((t) => t.id == id);
+    for (final m in state.members) {
+      if (m.teamId == id) m.teamId = null;
+    }
+    for (final a in state.areas) {
+      if (a.teamId == id) a.teamId = null;
+    }
+    _changed();
+  }
+
+  /// 소속을 바꾼다. [teamId] 가 null 이면 소속 없음. 팀장이었다면 팀장도 풀린다.
+  void setMemberTeam(String memberId, String? teamId) {
+    final m = memberById(memberId);
+    if (m == null || m.teamId == teamId) return;
+    _snapshot();
+    final old = teamById(m.teamId);
+    if (old != null && old.leaderId == memberId) old.leaderId = null;
+    m.teamId = teamId;
+    _changed();
+  }
+
+  /// 팀장 지정 — 같은 사람을 다시 누르면 풀린다. 다른 팀 사람이면 이 팀으로 옮긴다.
+  void toggleLeader(String teamId, String memberId) {
+    final t = teamById(teamId);
+    final m = memberById(memberId);
+    if (t == null || m == null) return;
+    _snapshot();
+    if (t.leaderId == memberId) {
+      t.leaderId = null;
+    } else {
+      final old = teamById(m.teamId);
+      if (old != null && old.id != teamId && old.leaderId == memberId) old.leaderId = null;
+      m.teamId = teamId;
+      t.leaderId = memberId;
+    }
+    _changed();
+  }
+
+  // ───────────────────────── 영역 ─────────────────────────
+
+  /// 영역 설정 화면에서 고친 목록으로 통째로 바꾼다.
+  void replaceAreas(List<LockerArea> areas) {
+    _snapshot();
+    state.areas
+      ..clear()
+      ..addAll(areas);
+    _changed();
+  }
+
+  /// [teamId] 가 [areaId] 를 가져간다. 팀이 갖고 있던 다른 영역은 내려놓는다.
+  void takeArea(String teamId, String areaId) {
+    _snapshot();
+    for (final a in state.areas) {
+      if (a.teamId == teamId) a.teamId = null;
+    }
+    areaById(areaId)?.teamId = teamId;
+    _changed();
+  }
+
+  /// 모든 영역을 주인 없는 상태로 — 새 추첨을 시작할 때
+  void releaseAreas() {
+    if (state.areas.every((a) => a.teamId == null)) return;
+    _snapshot();
+    for (final a in state.areas) {
+      a.teamId = null;
+    }
+    _changed();
+  }
+
+  /// 영역 자동 나누기 — 쓸 수 있는 칸을 번호 순서로 늘어놓고, 팀 인원 비율대로 앞에서부터 자른다.
+  /// 팀이 없으면 [count] 개로 똑같이 나눈다.
+  List<LockerArea> autoAreas({int? count}) {
+    final slots = [
+      for (final bank in state.banks)
+        for (final index in _orderedIndexes(bank))
+          if (!bank.disabled.contains(index)) slotKey(bank.id, index),
+    ];
+    final teams = state.teams;
+    final n = count ?? (teams.isEmpty ? 2 : teams.length);
+    final weights = teams.length == n
+        ? [for (final t in teams) max(1, membersOf(t.id).where((m) => !m.excluded).length)]
+        : List.filled(n, 1);
+    final total = weights.fold(0, (s, w) => s + w);
+    final areas = <LockerArea>[];
+    var start = 0;
+    var acc = 0;
+    for (var i = 0; i < n; i++) {
+      acc += weights[i];
+      final end = i == n - 1 ? slots.length : (slots.length * acc / total).round();
+      areas.add(LockerArea(
+        id: _newId(),
+        name: '영역 ${i + 1}',
+        color: i % AppColors.team.length,
+        slots: {...slots.sublist(start, end)},
+      ));
+      start = end;
+    }
+    return areas;
+  }
+
+  LockerArea newArea(Iterable<LockerArea> existing) {
+    final used = existing.map((a) => a.name).toSet();
+    var n = 1;
+    while (used.contains('영역 $n')) {
+      n++;
+    }
+    final colors = existing.map((a) => a.color).toSet();
+    var color = 0;
+    while (colors.contains(color) && color < AppColors.team.length) {
+      color++;
+    }
+    return LockerArea(id: _newId(), name: '영역 $n', color: color % AppColors.team.length);
+  }
+
+  // ───────────────────────── 추첨 기록 ─────────────────────────
+
+  /// 추첨 기록을 바꿨다 — 되돌리기 없이 저장만 한다.
+  void touchDraw() => _changed();
+
+  /// 새 추첨 — 본선 한 판을 연다. 가져간 영역은 모두 내려놓는다.
+  DrawRecord startDraw(List<String> teamIds) {
+    for (final a in state.areas) {
+      a.teamId = null;
+    }
+    state.draw = DrawRecord(teamIds: teamIds, rounds: [DrawRound(teamIds: teamIds)]);
+    _changed();
+    return state.draw!;
   }
 
   // ───────────────────────── 배치 조건 ─────────────────────────
@@ -330,6 +550,51 @@ class LockerController extends GetxController {
     state.pinned.retainWhere(keep.containsKey);
     state.lastShuffledAt = DateTime.now();
 
+    _startReveal(placed.keys.toList());
+    _changed();
+    final seated = placed.values.toSet();
+    final leftOver = people.where((m) => !seated.contains(m.id)).toList();
+    return ShuffleReport(
+      placed: placed.length,
+      leftOver: leftOver,
+      limitedByConditions: leftOver.isNotEmpty && free.length > placed.length,
+    );
+  }
+
+  /// 한 팀만 자기 영역 안에서 랜덤 배치한다. 영역 안 고정 칸은 그대로 두고,
+  /// 영역에 들어와 있던 다른 팀 사람은 미배치가 된다. 팀에 영역이 없으면 null.
+  ShuffleReport? shuffleTeam(String teamId) {
+    final area = areaOfTeam(teamId);
+    if (area == null) return null;
+    _snapshot();
+    final pinnedHere = {
+      for (final s in area.slots)
+        if (state.pinned.contains(s) && state.assignments[s] != null) s,
+    };
+    // 영역 밖에 고정된 팀원은 건드리지 않는다.
+    final pinnedMembers = {for (final s in state.pinned) ?state.assignments[s]};
+    final people = activeMembers
+        .where((m) => m.teamId == teamId && !pinnedMembers.contains(m.id))
+        .toList()
+      ..shuffle(_random);
+    final moving = people.map((m) => m.id).toSet();
+    state.assignments.removeWhere(
+        (slot, id) => moving.contains(id) || (area.slots.contains(slot) && !pinnedHere.contains(slot)));
+    _slotOfMember = null;
+
+    final free = <SlotKey>[
+      for (final bank in state.banks)
+        for (final index in _orderedIndexes(bank))
+          if (area.slots.contains(slotKey(bank.id, index)) &&
+              !bank.disabled.contains(index) &&
+              !pinnedHere.contains(slotKey(bank.id, index)))
+            slotKey(bank.id, index),
+    ];
+    if (state.fillMode == FillMode.scatter) free.shuffle(_random);
+
+    final placed = _assign(people, free);
+    state.assignments.addAll(placed);
+    state.lastShuffledAt = DateTime.now();
     _startReveal(placed.keys.toList());
     _changed();
     final seated = placed.values.toSet();
@@ -509,6 +774,12 @@ class LockerController extends GetxController {
         ..clear()
         ..addAll(slots);
     }
+    for (final a in state.areas) {
+      final slots = {for (final s in a.slots) ?moved[s]};
+      a.slots
+        ..clear()
+        ..addAll(slots);
+    }
     _changed();
   }
 
@@ -619,18 +890,34 @@ class LockerController extends GetxController {
       return bank == null || index >= bank.size || bank.disabled.contains(index);
     });
     state.pinned.retainWhere(state.assignments.containsKey);
+    bool validSlot(SlotKey slot) {
+      final (bankId, index) = parseSlotKey(slot);
+      final bank = bankById(bankId);
+      return bank != null && index < bank.size;
+    }
+
     for (final c in state.conditions) {
       c.memberIds.retainWhere(ids.contains);
-      c.slots.retainWhere((slot) {
-        final (bankId, index) = parseSlotKey(slot);
-        final bank = bankById(bankId);
-        return bank != null && index < bank.size;
-      });
+      c.slots.retainWhere(validSlot);
+    }
+    final teamIds = state.teams.map((t) => t.id).toSet();
+    for (final m in state.members) {
+      if (!teamIds.contains(m.teamId)) m.teamId = null;
+    }
+    for (final t in state.teams) {
+      if (!ids.contains(t.leaderId)) t.leaderId = null;
+    }
+    // 한 칸은 한 영역에만 속한다.
+    final taken = <SlotKey>{};
+    for (final a in state.areas) {
+      a.slots.retainWhere((s) => validSlot(s) && taken.add(s));
+      if (!teamIds.contains(a.teamId)) a.teamId = null;
     }
   }
 
   void _changed() {
     _slotOfMember = null;
+    _areaOfSlot = null;
     version.value++;
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 300), flush);

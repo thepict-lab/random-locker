@@ -118,6 +118,12 @@ class _Caption extends StatelessWidget {
         const _Legend(color: Colors.white, line: AppColors.brandLine, label: '배치됨'),
         const _Legend(color: AppColors.pinned, line: AppColors.pinnedLine, label: '고정'),
         const _Legend(color: AppColors.disabled, line: Color(0xFFD3D8E0), label: '사용 안 함'),
+        for (final a in c.state.areas)
+          _Legend(
+            color: AppColors.teamSoft(c.colorOfArea(a)),
+            line: AppColors.teamColor(c.colorOfArea(a)),
+            label: a.teamId == null ? a.name : '${a.name} · ${c.teamById(a.teamId)?.name ?? ''}',
+          ),
       ],
     );
   }
@@ -254,6 +260,7 @@ class LockerCell extends StatelessWidget {
       final number = c.numberOf(bank, index);
 
       final violation = !hidden && c.violatesCondition(slot);
+      final area = c.areaOf(slot);
 
       Widget cell(bool dropping) => _CellFace(
             number: number,
@@ -266,6 +273,7 @@ class LockerCell extends StatelessWidget {
             highlight: highlight,
             dropping: dropping,
             hiddenName: hidden ? _rollingName(c) : null,
+            areaColor: area == null ? null : c.colorOfArea(area),
           );
 
       Widget body = DragTarget<MemberDrag>(
@@ -309,12 +317,19 @@ class LockerCell extends StatelessWidget {
     return people[(index * 7 + bank.id.hashCode + c.revealCount.value * 3) % people.length].name;
   }
 
-  /// 손으로 놓은 자리가 배치 조건에 어긋나면 알려 준다 (놓는 것 자체는 막지 않는다).
+  /// 손으로 놓은 자리가 배치 조건이나 팀 영역에 어긋나면 알려 준다 (놓는 것 자체는 막지 않는다).
   static void _warnIfViolates(List<SlotKey> slots) {
     final c = LockerController.to;
     for (final s in slots) {
       final member = c.memberById(c.memberAt(s));
       if (member == null || c.isAllowed(member.id, s)) continue;
+      if (!c.areaAllows(member.id, s)) {
+        final owner = c.teamById(c.areaOf(s)?.teamId);
+        showToast(owner != null && owner.id != member.teamId
+            ? '${c.slotLabel(s)}번은 ${owner.name} 영역입니다.'
+            : '${member.name}님이 ${c.teamById(member.teamId)?.name ?? ''} 영역 밖에 놓였습니다.');
+        return;
+      }
       final rules = c.conditionsOf(member.id).where((x) => x.forbids(member.id, s));
       showToast('${member.name}님은 ${rules.map((x) => x.name).join(', ')}에 따라 '
           '${c.slotLabel(s)}번에 배치하지 않는 조건이 있습니다.');
@@ -415,7 +430,11 @@ class _CellFace extends StatelessWidget {
     required this.dropping,
     required this.hiddenName,
     this.violation = false,
+    this.areaColor,
   });
+
+  /// 이 칸이 속한 영역의 색 번호
+  final int? areaColor;
 
   final int number;
   final String? name;
@@ -447,6 +466,9 @@ class _CellFace extends StatelessWidget {
     } else if (pinned) {
       bg = AppColors.pinned;
       border = AppColors.pinnedLine;
+    } else if (areaColor != null) {
+      bg = filled ? Colors.white : AppColors.teamSoft(areaColor!);
+      border = AppColors.teamColor(areaColor!).withValues(alpha: filled ? 0.55 : 0.35);
     } else if (filled) {
       bg = Colors.white;
       border = AppColors.brandLine;
@@ -473,6 +495,19 @@ class _CellFace extends StatelessWidget {
       ),
       child: Stack(
         children: [
+          if (areaColor != null && !disabled)
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: Container(
+                width: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.teamColor(areaColor!),
+                  borderRadius: const BorderRadius.horizontal(left: Radius.circular(7)),
+                ),
+              ),
+            ),
           Positioned(
             left: 6,
             top: 3,
@@ -490,7 +525,7 @@ class _CellFace extends StatelessWidget {
               right: 4,
               bottom: 3,
               child: Tooltip(
-                message: '배치 조건에 어긋난 자리입니다',
+                message: '배치 조건이나 팀 영역에 어긋난 자리입니다',
                 child: Icon(Icons.warning_amber_rounded,
                     size: numberSize + 2, color: const Color(0xFFE08A00)),
               ),

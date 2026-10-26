@@ -15,6 +15,8 @@ void main() {
     dir = await Directory.systemTemp.createTemp('random_locker_test');
     c = LockerController(LockerRepository(directory: dir));
     await c.ready;
+    // 처음 실행은 기본 명단이 들어 있다 — 테스트는 빈 명단에서 시작한다.
+    c.removeAllMembers();
   });
 
   tearDown(() async {
@@ -190,6 +192,102 @@ void main() {
       c.replaceConditions([c.newCondition([])..memberIds.add(ga)]);
       c.removeMember(ga);
       expect(c.state.conditions.single.memberIds, isEmpty);
+    });
+  });
+
+  test('처음 실행하면 페인터 구성원 50명 (규형은 한 명)', () async {
+    final fresh = LockerController(
+        LockerRepository(directory: await Directory.systemTemp.createTemp('random_locker_fresh')));
+    await fresh.ready;
+    expect(fresh.state.members.length, 50);
+    expect(fresh.state.members.where((m) => m.name == '규형').length, 1);
+  });
+
+  group('팀 · 영역', () {
+    late Team t1, t2;
+    late LockerArea a1, a2;
+
+    setUp(() {
+      c.addMembers(['가', '나', '다', '라', '마']);
+      t1 = c.addTeam();
+      t2 = c.addTeam();
+      final ms = c.state.members;
+      c.setMemberTeam(ms[0].id, t1.id);
+      c.setMemberTeam(ms[1].id, t1.id);
+      c.setMemberTeam(ms[2].id, t2.id);
+      a1 = c.newArea([])..slots.addAll({'A:0', 'A:1', 'A:2'});
+      a2 = c.newArea([a1])..slots.addAll({'B:0', 'B:1'});
+      c.replaceAreas([a1, a2]);
+    });
+
+    test('팀 기본 이름 · 팀장', () {
+      expect([t1.name, t2.name], ['1팀', '2팀']);
+      final ga = c.state.members[0].id;
+      c.toggleLeader(t2.id, ga); // 다른 팀 사람을 팀장으로 → 그 팀으로 옮긴다
+      expect(c.memberById(ga)!.teamId, t2.id);
+      expect(c.teamById(t2.id)!.leaderId, ga);
+      c.setMemberTeam(ga, null);
+      expect(c.teamById(t2.id)!.leaderId, isNull);
+    });
+
+    test('영역을 가져간 팀은 자기 영역 안에만, 남의 영역에는 아무도 못 들어간다', () {
+      c.takeArea(t1.id, a1.id);
+      c.takeArea(t2.id, a2.id);
+      for (var round = 0; round < 20; round++) {
+        c.shuffle();
+        c.skipReveal();
+        final ms = c.state.members;
+        expect(a1.slots.contains(c.slotOf(ms[0].id)), isTrue);
+        expect(a1.slots.contains(c.slotOf(ms[1].id)), isTrue);
+        expect(a2.slots.contains(c.slotOf(ms[2].id)), isTrue);
+        for (final m in ms.skip(3)) {
+          final slot = c.slotOf(m.id)!;
+          expect(a1.slots.contains(slot) || a2.slots.contains(slot), isFalse);
+        }
+      }
+    });
+
+    test('팀별 랜덤 배치 — 영역 안에서만, 다른 팀은 그대로', () {
+      c.takeArea(t1.id, a1.id);
+      final other = c.state.members[4].id;
+      c.placeMember(other, 'A:1'); // 1팀 영역에 들어와 있던 다른 사람
+      c.placeMember(c.state.members[2].id, 'B:3');
+      final report = c.shuffleTeam(t1.id)!;
+      c.skipReveal();
+      expect(report.placed, 2);
+      expect(c.slotOf(other), isNull);
+      expect(c.slotOf(c.state.members[2].id), 'B:3');
+      expect(c.shuffleTeam(t2.id), isNull); // 영역 없음
+    });
+
+    test('한 팀은 영역 하나 · 새 추첨이면 영역을 내려놓는다', () {
+      c.takeArea(t1.id, a1.id);
+      c.takeArea(t1.id, a2.id);
+      expect(c.areaOfTeam(t1.id)!.id, a2.id);
+      expect(a1.teamId, isNull);
+      c.startDraw([t1.id, t2.id]);
+      expect(c.areaOfTeam(t1.id), isNull);
+      expect(c.state.draw!.rounds.single.teamIds, [t1.id, t2.id]);
+    });
+
+    test('자동 나누기는 팀 인원 비율로 모든 칸을 나눈다', () {
+      final areas = c.autoAreas();
+      expect(areas.length, 2);
+      expect(areas.fold(0, (s, a) => s + a.slots.length), 63);
+      expect(areas[0].slots.length, 42); // 2명 : 1명
+    });
+
+    test('팀 · 영역 · 추첨 기록 저장 후 다시 읽기', () async {
+      c.takeArea(t1.id, a1.id);
+      c.startDraw([t1.id, t2.id]).rounds.single.picks[t1.id] = [1, 2, 3, 4, 5];
+      c.takeArea(t2.id, a2.id);
+      await c.flush();
+      final again = LockerController(LockerRepository(directory: dir));
+      await again.ready;
+      expect(again.state.teams.map((t) => t.name), ['1팀', '2팀']);
+      expect(again.areaOfTeam(t2.id)!.slots, {'B:0', 'B:1'});
+      expect(again.state.draw!.rounds.single.picks[t1.id], [1, 2, 3, 4, 5]);
+      expect(again.state.members[0].teamId, t1.id);
     });
   });
 

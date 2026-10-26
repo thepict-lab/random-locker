@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
+import '../../core/navigation/app_navigation.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/win_file_dialog.dart';
 import '../../main.dart';
@@ -13,7 +14,9 @@ import '../controller/locker_controller.dart';
 import '../widget/condition_dialog.dart';
 import '../widget/locker_board.dart';
 import '../widget/member_panel.dart';
+import '../widget/area_dialog.dart';
 import '../widget/settings_dialog.dart';
+import '../widget/team_dialog.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -295,13 +298,39 @@ class _TopBar extends StatelessWidget {
             );
           }),
           IconButton(
+            tooltip: '팀 설정',
+            onPressed: () => showTeamDialog(context),
+            icon: const Icon(Icons.groups_rounded),
+          ),
+          IconButton(
+            tooltip: '영역 설정',
+            onPressed: () => showAreaDialog(context),
+            icon: const Icon(Icons.dashboard_customize_outlined),
+          ),
+          IconButton(
             tooltip: '신발장 설정',
             onPressed: () => showSettingsDialog(context),
             icon: const Icon(Icons.tune_rounded),
           ),
           const SizedBox(width: 12),
           Tooltip(
-            message: '고정한 칸은 그대로 두고 섞습니다 (F5)',
+            message: '팀장들이 숫자를 골라 추첨하고, 순위대로 영역을 고릅니다',
+            child: FilledButton.icon(
+              onPressed: () => Get.toNamed(PageInfo.draw),
+              style: FilledButton.styleFrom(
+                backgroundColor: DrawColors.accent,
+                foregroundColor: DrawColors.accentFg,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+              ),
+              icon: const Icon(Icons.casino_rounded),
+              label: const Text('팀장 추첨'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Tooltip(
+            message: '고정한 칸은 그대로 두고 섞습니다. 영역을 가진 팀은 자기 영역 안에서만 섞입니다 (F5)',
             child: FilledButton.icon(
               onPressed: onShuffle,
               style: FilledButton.styleFrom(

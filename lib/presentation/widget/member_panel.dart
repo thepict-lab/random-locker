@@ -130,8 +130,13 @@ class _MemberPanelState extends State<MemberPanel> {
                 icon: const Icon(Icons.more_vert_rounded, size: 20),
                 onSelected: (v) {
                   if (v == 'removeAll') _removeAll();
+                  if (v == 'roster') {
+                    final added = c.addDefaultRoster();
+                    showToast(added == 0 ? '기본 명단의 이름이 모두 이미 있습니다.' : '기본 명단에서 $added명을 넣었습니다.');
+                  }
                 },
                 itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'roster', child: Text('페인터 기본 명단 넣기')),
                   PopupMenuItem(value: 'removeAll', child: Text('멤버 전체 삭제')),
                 ],
               ),
@@ -220,6 +225,24 @@ class _MemberTile extends StatelessWidget {
     final c = LockerController.to;
     final slot = c.slotOf(member.id);
     final pinned = slot != null && c.isPinned(slot);
+    final team = c.teamById(member.teamId);
+
+    final avatar = CircleAvatar(
+      radius: 14,
+      backgroundColor: member.excluded
+          ? AppColors.disabled
+          : (slot != null ? AppColors.brand : AppColors.brandSoft),
+      child: Text(
+        member.name.characters.first,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: member.excluded
+              ? AppColors.inkMute
+              : (slot != null ? Colors.white : AppColors.brand),
+        ),
+      ),
+    );
 
     final tile = MouseRegion(
       onEnter: (_) => c.hoveredMember.value = member.id,
@@ -232,22 +255,21 @@ class _MemberTile extends StatelessWidget {
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(8)),
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 14,
-              backgroundColor: member.excluded
-                  ? AppColors.disabled
-                  : (slot != null ? AppColors.brand : AppColors.brandSoft),
-              child: Text(
-                member.name.characters.first,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: member.excluded
-                      ? AppColors.inkMute
-                      : (slot != null ? Colors.white : AppColors.brand),
+            // 소속 팀이 있으면 팀 색 테두리
+            if (team == null)
+              avatar
+            else
+              Tooltip(
+                message: '${team.name}${team.leaderId == member.id ? ' 팀장' : ''}',
+                child: Container(
+                  padding: const EdgeInsets.all(1.5),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.teamColor(team.color), width: 2),
+                  ),
+                  child: avatar,
                 ),
               ),
-            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
