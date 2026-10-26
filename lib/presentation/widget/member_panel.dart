@@ -200,7 +200,7 @@ class _MemberPanelState extends State<MemberPanel> {
           ),
           const SizedBox(height: 6),
           const Text(
-            '이름을 칸으로 끌어 놓으면 직접 배치됩니다',
+            '이름을 칸으로 끌어 배치 · 칸 우클릭은 사용 안 함',
             style: TextStyle(fontSize: 11.5, color: AppColors.inkMute),
           ),
         ],
@@ -261,6 +261,16 @@ class _MemberTile extends StatelessWidget {
                 ),
               ),
             ),
+            if (c.conditionsOf(member.id) case final rules when rules.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Tooltip(
+                  message: rules
+                      .map((r) => '${r.name} · ${r.type.label} (${r.slots.length}칸)')
+                      .join('\n'),
+                  child: const Icon(Icons.rule_rounded, size: 16, color: AppColors.brand),
+                ),
+              ),
             _SlotBadge(
               label: member.excluded
                   ? '제외'
@@ -361,7 +371,7 @@ class _EmptyMembers extends StatelessWidget {
                 style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.inkSub)),
             const SizedBox(height: 6),
             const Text(
-              '위 칸에 이름을 입력하거나\n잔디 등에서 복사한 명단을 가져오세요.',
+              '위 칸에 이름을 입력하거나\n복사한 명단을 가져오세요.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12.5, color: AppColors.inkMute, height: 1.5),
             ),

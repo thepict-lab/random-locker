@@ -105,7 +105,7 @@ class _ImportDialogState extends State<_ImportDialog> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    '잔디 멤버 목록이나 엑셀에서 이름을 복사해 붙여넣거나, '
+                    '멤버 목록이나 엑셀에서 이름을 복사해 붙여넣거나, '
                     '엑셀(.xlsx) · CSV 파일을 여세요. "이름" 열을 자동으로 찾고, '
                     '이메일 · 전화번호 같은 칸은 걸러 냅니다.',
                     style: TextStyle(fontSize: 13, color: AppColors.inkSub, height: 1.5),

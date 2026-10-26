@@ -64,6 +64,75 @@ SlotKey slotKey(String bankId, int index) => '$bankId:$index';
   return (key.substring(0, i), int.parse(key.substring(i + 1)));
 }
 
+/// 배치 조건의 종류
+enum ConditionType {
+  /// 대상 멤버는 고른 자리에 배치하지 않는다
+  exclude('이 자리 제외'),
+
+  /// 대상 멤버는 고른 자리 중에서만 배치한다
+  only('이 자리에만');
+
+  const ConditionType(this.label);
+  final String label;
+}
+
+/// 배치 조건 — "이 사람들은 이 자리를 빼고(또는 이 자리에만) 돌린다".
+/// 랜덤 배치에만 적용한다. 고정한 칸과 손으로 놓은 배치는 그대로 두되 화면에 표시한다.
+class LockerCondition {
+  LockerCondition({
+    required this.id,
+    required this.name,
+    this.type = ConditionType.exclude,
+    this.enabled = true,
+    Set<String>? memberIds,
+    Set<SlotKey>? slots,
+  })  : memberIds = memberIds ?? <String>{},
+        slots = slots ?? <SlotKey>{};
+
+  final String id;
+  String name;
+  ConditionType type;
+  bool enabled;
+  final Set<String> memberIds;
+  final Set<SlotKey> slots;
+
+  /// 이 조건이 [memberId] 를 [slot] 에 두는 것을 막는가
+  bool forbids(String memberId, SlotKey slot) {
+    if (!enabled || !memberIds.contains(memberId)) return false;
+    return switch (type) {
+      ConditionType.exclude => slots.contains(slot),
+      ConditionType.only => !slots.contains(slot),
+    };
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'type': type.name,
+        'enabled': enabled,
+        'members': memberIds.toList(),
+        'slots': slots.toList(),
+      };
+
+  factory LockerCondition.fromJson(Map<String, dynamic> json) => LockerCondition(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? '조건',
+        type: ConditionType.values.asNameMap()[json['type']] ?? ConditionType.exclude,
+        enabled: json['enabled'] as bool? ?? true,
+        memberIds: {...(json['members'] as List? ?? const []).cast<String>()},
+        slots: {...(json['slots'] as List? ?? const []).cast<String>()},
+      );
+
+  LockerCondition copy() => LockerCondition(
+        id: id,
+        name: name,
+        type: type,
+        enabled: enabled,
+        memberIds: {...memberIds},
+        slots: {...slots},
+      );
+}
+
 /// 빈 칸을 고르는 방식
 enum FillMode {
   /// 남는 칸이 신발장 곳곳에 흩어진다
@@ -92,11 +161,12 @@ class LockerState {
     required this.banks,
     required this.assignments,
     required this.pinned,
+    List<LockerCondition>? conditions,
     this.fillMode = FillMode.scatter,
     this.numbering = NumberingOrder.rowMajor,
     this.continuousNumbering = false,
     this.lastShuffledAt,
-  });
+  }) : conditions = conditions ?? [];
 
   final List<Member> members;
   final List<LockerBank> banks;
@@ -106,6 +176,9 @@ class LockerState {
 
   /// 랜덤 배치 때 그대로 두는 칸
   final Set<SlotKey> pinned;
+
+  /// 랜덤 배치 조건
+  final List<LockerCondition> conditions;
 
   FillMode fillMode;
   NumberingOrder numbering;
@@ -132,6 +205,7 @@ class LockerState {
         'banks': banks.map((b) => b.toJson()).toList(),
         'assignments': assignments,
         'pinned': pinned.toList(),
+        'conditions': conditions.map((c) => c.toJson()).toList(),
         'fillMode': fillMode.name,
         'numbering': numbering.name,
         'continuousNumbering': continuousNumbering,
@@ -150,6 +224,10 @@ class LockerState {
         assignments:
             (json['assignments'] as Map? ?? const {}).cast<String, String>(),
         pinned: {...(json['pinned'] as List? ?? const []).cast<String>()},
+        conditions: [
+          for (final c in json['conditions'] as List? ?? const [])
+            LockerCondition.fromJson((c as Map).cast<String, dynamic>()),
+        ],
         fillMode: FillMode.values.asNameMap()[json['fillMode']] ?? FillMode.scatter,
         numbering: NumberingOrder.values.asNameMap()[json['numbering']] ??
             NumberingOrder.rowMajor,

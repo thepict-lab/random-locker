@@ -9,13 +9,20 @@ import '../../data/repository/locker_repository.dart';
 
 /// 랜덤 배치 결과
 class ShuffleReport {
-  const ShuffleReport({required this.placed, required this.leftOver});
+  const ShuffleReport({
+    required this.placed,
+    required this.leftOver,
+    required this.limitedByConditions,
+  });
 
   /// 이번에 새로 칸을 받은 사람 수 (고정 칸 제외)
   final int placed;
 
-  /// 칸이 모자라 배치되지 못한 사람
+  /// 칸을 받지 못한 사람
   final List<Member> leftOver;
+
+  /// 빈 칸은 남았는데 배치 조건 때문에 못 들어간 사람이 있다
+  final bool limitedByConditions;
 }
 
 /// 신발장 설정 화면에서 넘겨받는 한 세트의 값
@@ -81,6 +88,21 @@ class LockerController extends GetxController {
   }
 
   bool isPinned(SlotKey slot) => state.pinned.contains(slot);
+
+  /// 배치 조건으로 보아 [memberId] 를 [slot] 에 둘 수 있는가
+  bool isAllowed(String memberId, SlotKey slot) =>
+      !state.conditions.any((c) => c.forbids(memberId, slot));
+
+  /// [memberId] 가 대상인 (켜진) 조건
+  List<LockerCondition> conditionsOf(String memberId) => state.conditions
+      .where((c) => c.enabled && c.memberIds.contains(memberId))
+      .toList();
+
+  /// 이 칸의 사람이 조건에 어긋나 있다 (손으로 놓았거나 고정한 경우)
+  bool violatesCondition(SlotKey slot) {
+    final id = state.assignments[slot];
+    return id != null && !isAllowed(id, slot);
+  }
 
   bool isDisabled(SlotKey slot) {
     final (bankId, index) = parseSlotKey(slot);
@@ -169,6 +191,9 @@ class LockerController extends GetxController {
     _snapshot();
     _unassignMember(id);
     state.members.removeWhere((m) => m.id == id);
+    for (final c in state.conditions) {
+      c.memberIds.remove(id);
+    }
     _changed();
   }
 
@@ -178,8 +203,35 @@ class LockerController extends GetxController {
     state.members.clear();
     state.assignments.clear();
     state.pinned.clear();
+    for (final c in state.conditions) {
+      c.memberIds.clear();
+    }
     _changed();
   }
+
+  // ───────────────────────── 배치 조건 ─────────────────────────
+
+  /// 조건 편집 화면에서 고친 목록으로 통째로 바꾼다.
+  void replaceConditions(List<LockerCondition> conditions) {
+    _snapshot();
+    state.conditions
+      ..clear()
+      ..addAll(conditions);
+    _changed();
+  }
+
+  /// 새 조건의 기본 이름 — 조건 1, 조건 2 …
+  String nextConditionName(Iterable<LockerCondition> existing) {
+    final used = existing.map((c) => c.name).toSet();
+    var n = 1;
+    while (used.contains('조건 $n')) {
+      n++;
+    }
+    return '조건 $n';
+  }
+
+  LockerCondition newCondition(Iterable<LockerCondition> existing) =>
+      LockerCondition(id: _newId(), name: nextConditionName(existing));
 
   // ───────────────────────── 칸 ─────────────────────────
 
@@ -250,6 +302,7 @@ class LockerController extends GetxController {
   // ───────────────────────── 배치 ─────────────────────────
 
   /// 랜덤 배치. 고정 칸은 그대로 두고 나머지 사람을 남은 칸에 섞어 넣는다.
+  /// 배치 조건은 지킨다 — 조건 때문에 들어갈 칸이 없는 사람은 [ShuffleReport.leftOver] 로 알린다.
   ShuffleReport shuffle() {
     _snapshot();
     final keep = <SlotKey, String>{
@@ -269,20 +322,65 @@ class LockerController extends GetxController {
     ];
     if (state.fillMode == FillMode.scatter) free.shuffle(_random);
 
-    final count = min(people.length, free.length);
-    final chosen = free.take(count).toList();
+    final placed = _assign(people, free);
     state.assignments
       ..clear()
-      ..addAll(keep);
-    for (var i = 0; i < count; i++) {
-      state.assignments[chosen[i]] = people[i].id;
-    }
+      ..addAll(keep)
+      ..addAll(placed);
     state.pinned.retainWhere(keep.containsKey);
     state.lastShuffledAt = DateTime.now();
 
-    _startReveal(chosen);
+    _startReveal(placed.keys.toList());
     _changed();
-    return ShuffleReport(placed: count, leftOver: people.skip(count).toList());
+    final seated = placed.values.toSet();
+    final leftOver = people.where((m) => !seated.contains(m.id)).toList();
+    return ShuffleReport(
+      placed: placed.length,
+      leftOver: leftOver,
+      limitedByConditions: leftOver.isNotEmpty && free.length > placed.length,
+    );
+  }
+
+  /// 조건을 지키며 [people] 을 [slots] 에 될 수 있는 한 많이 넣는다.
+  /// "앞 번호부터" 모드면 [slots] 의 앞쪽을 가장 짧게 쓰는 배치를 고른다.
+  Map<SlotKey, String> _assign(List<Member> people, List<SlotKey> slots) {
+    final best = _match(people, slots);
+    if (state.fillMode != FillMode.sequential) return best;
+    // 조건이 앞 칸을 막으면 몇 칸 더 뒤까지 써야 한다 — 다 들어가는 가장 짧은 앞부분을 찾는다.
+    for (var k = min(best.length, slots.length); k < slots.length; k++) {
+      final m = _match(people, slots.sublist(0, k));
+      if (m.length == best.length) return m;
+    }
+    return best;
+  }
+
+  /// 이분 매칭(증가 경로). 사람은 [people] 순서, 칸은 [slots] 순서대로 먼저 시도하므로
+  /// 두 목록을 섞어 넘기면 결과도 무작위다. 조건이 걸린 사람(갈 수 있는 칸이 적은 사람)을
+  /// 먼저 앉혀서, 칸이 모자랄 때 조건 있는 사람이 밀려나지 않게 한다.
+  Map<SlotKey, String> _match(List<Member> people, List<SlotKey> slots) {
+    final allowed = {
+      for (final m in people) m.id: [for (final s in slots) if (isAllowed(m.id, s)) s],
+    };
+    final owner = <SlotKey, String>{};
+
+    bool seat(String id, Set<SlotKey> visited) {
+      for (final s in allowed[id]!) {
+        if (!visited.add(s)) continue;
+        final current = owner[s];
+        if (current == null || seat(current, visited)) {
+          owner[s] = id;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    final order = [...people]
+      ..sort((a, b) => allowed[a.id]!.length.compareTo(allowed[b.id]!.length));
+    for (final m in order) {
+      seat(m.id, <SlotKey>{});
+    }
+    return owner;
   }
 
   /// 칸 번호 순서대로의 index — "앞 번호부터" 채우기에 쓴다.
@@ -364,6 +462,7 @@ class LockerController extends GetxController {
     final next = <LockerBank>[];
     final assignments = <SlotKey, String>{};
     final pinned = <SlotKey>{};
+    final moved = <SlotKey, SlotKey>{}; // 예전 칸 → 새 칸 (배치 조건의 자리도 따라 옮긴다)
     for (final edit in edits) {
       final old = edit.id == null ? null : bankById(edit.id!);
       final bank = LockerBank(
@@ -383,10 +482,12 @@ class LockerController extends GetxController {
         }
         for (var i = 0; i < old.size; i++) {
           final n = remap(i);
+          if (n == null) continue;
           final from = slotKey(old.id, i);
-          final member = state.assignments[from];
-          if (n == null || member == null) continue;
           final to = slotKey(bank.id, n);
+          moved[from] = to;
+          final member = state.assignments[from];
+          if (member == null) continue;
           assignments[to] = member;
           if (state.pinned.contains(from)) pinned.add(to);
         }
@@ -402,6 +503,12 @@ class LockerController extends GetxController {
     state.pinned
       ..clear()
       ..addAll(pinned);
+    for (final c in state.conditions) {
+      final slots = {for (final s in c.slots) ?moved[s]};
+      c.slots
+        ..clear()
+        ..addAll(slots);
+    }
     _changed();
   }
 
@@ -512,6 +619,14 @@ class LockerController extends GetxController {
       return bank == null || index >= bank.size || bank.disabled.contains(index);
     });
     state.pinned.retainWhere(state.assignments.containsKey);
+    for (final c in state.conditions) {
+      c.memberIds.retainWhere(ids.contains);
+      c.slots.retainWhere((slot) {
+        final (bankId, index) = parseSlotKey(slot);
+        final bank = bankById(bankId);
+        return bank != null && index < bank.size;
+      });
+    }
   }
 
   void _changed() {

@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../data/models/locker_models.dart';
+import '../../main.dart';
 import '../controller/locker_controller.dart';
 import 'member_picker_dialog.dart';
 
@@ -252,9 +253,12 @@ class LockerCell extends StatelessWidget {
       final highlight = member != null && member.id == hovered;
       final number = c.numberOf(bank, index);
 
+      final violation = !hidden && c.violatesCondition(slot);
+
       Widget cell(bool dropping) => _CellFace(
             number: number,
             name: member?.name,
+            violation: violation,
             height: height,
             disabled: disabled,
             pinned: pinned,
@@ -267,16 +271,18 @@ class LockerCell extends StatelessWidget {
       Widget body = DragTarget<MemberDrag>(
         onWillAcceptWithDetails: (d) => !disabled && d.data.fromSlot != slot,
         onAcceptWithDetails: (d) {
-          if (d.data.fromSlot case final from?) {
+          final from = d.data.fromSlot;
+          if (from != null) {
             c.swapSlots(from, slot);
           } else {
             c.placeMember(d.data.memberId, slot);
           }
+          _warnIfViolates([slot, ?from]);
         },
         builder: (context, candidates, _) => GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapUp: (d) => _showMenu(context, d.globalPosition),
-          onSecondaryTapUp: (d) => _showMenu(context, d.globalPosition),
+          onSecondaryTap: _toggleDisabled,
           child: MouseRegion(
             cursor: disabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
             child: cell(candidates.isNotEmpty),
@@ -301,6 +307,35 @@ class LockerCell extends StatelessWidget {
     final people = c.state.members;
     if (people.isEmpty) return '';
     return people[(index * 7 + bank.id.hashCode + c.revealCount.value * 3) % people.length].name;
+  }
+
+  /// 손으로 놓은 자리가 배치 조건에 어긋나면 알려 준다 (놓는 것 자체는 막지 않는다).
+  static void _warnIfViolates(List<SlotKey> slots) {
+    final c = LockerController.to;
+    for (final s in slots) {
+      final member = c.memberById(c.memberAt(s));
+      if (member == null || c.isAllowed(member.id, s)) continue;
+      final rules = c.conditionsOf(member.id).where((x) => x.forbids(member.id, s));
+      showToast('${member.name}님은 ${rules.map((x) => x.name).join(', ')}에 따라 '
+          '${c.slotLabel(s)}번에 배치하지 않는 조건이 있습니다.');
+      return;
+    }
+  }
+
+  /// 우클릭 — 메뉴 없이 바로 사용 안 함 / 다시 사용
+  void _toggleDisabled() {
+    final c = LockerController.to;
+    if (c.isRevealing) {
+      c.skipReveal();
+      return;
+    }
+    final member = c.memberById(c.memberAt(slot));
+    final wasDisabled = bank.disabled.contains(index);
+    c.toggleDisabled(slot);
+    if (!wasDisabled && member != null) {
+      showToast('${c.slotLabel(slot)}번을 사용 안 함으로 바꿨습니다. ${member.name}님은 미배치가 됩니다.',
+          actionLabel: '되돌리기', onAction: c.undo);
+    }
   }
 
   Future<void> _showMenu(BuildContext context, Offset at) async {
@@ -336,14 +371,18 @@ class LockerCell extends StatelessWidget {
           ],
         ],
         _item('disable', disabled ? Icons.check_circle_outline_rounded : Icons.block_rounded,
-            disabled ? '다시 사용' : '사용 안 함 (고장 · 공용)'),
+            disabled ? '다시 사용' : '사용 안 함'),
       ],
     );
     if (!context.mounted) return;
     switch (choice) {
       case 'pick':
         final id = await showMemberPicker(context, title: '${c.slotLabel(slot)}번에 넣을 사람');
-        if (id != null) c.placeMember(id, slot);
+        if (id != null) {
+          final from = c.slotOf(id);
+          c.placeMember(id, slot);
+          _warnIfViolates([slot, ?from]);
+        }
       case 'pin':
         c.togglePin(slot);
       case 'clear':
@@ -375,10 +414,14 @@ class _CellFace extends StatelessWidget {
     required this.highlight,
     required this.dropping,
     required this.hiddenName,
+    this.violation = false,
   });
 
   final int number;
   final String? name;
+
+  /// 배치 조건에 어긋난 자리 (손으로 놓았거나 고정한 경우)
+  final bool violation;
   final double height;
   final bool disabled;
   final bool pinned;
@@ -442,6 +485,16 @@ class _CellFace extends StatelessWidget {
               ),
             ),
           ),
+          if (violation)
+            Positioned(
+              right: 4,
+              bottom: 3,
+              child: Tooltip(
+                message: '배치 조건에 어긋난 자리입니다',
+                child: Icon(Icons.warning_amber_rounded,
+                    size: numberSize + 2, color: const Color(0xFFE08A00)),
+              ),
+            ),
           if (pinned && !hidden)
             Positioned(
               right: 4,

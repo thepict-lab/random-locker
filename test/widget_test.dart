@@ -88,6 +88,111 @@ void main() {
     expect(c.memberAt(slotKey('A', 4)), id); // 2행 2열 (cols 3)
   });
 
+  group('배치 조건', () {
+    test('제외한 자리에는 랜덤 배치하지 않는다', () {
+      c.addMembers(List.generate(60, (i) => '사람$i'));
+      final target = c.state.members.take(3).map((m) => m.id).toSet();
+      final bottom = {for (var col = 0; col < 4; col++) slotKey('A', 6 * 4 + col)};
+      c.replaceConditions([
+        c.newCondition([])
+          ..memberIds.addAll(target)
+          ..slots.addAll({...bottom, for (var i = 0; i < 40; i++) slotKey('B', i)}),
+      ]);
+      for (var round = 0; round < 30; round++) {
+        final report = c.shuffle();
+        c.skipReveal();
+        expect(report.placed, 60);
+        for (final id in target) {
+          final slot = c.slotOf(id)!;
+          expect(slot.startsWith('A:'), isTrue);
+          expect(bottom.contains(slot), isFalse);
+        }
+      }
+    });
+
+    test('이 자리에만 — 고른 칸 밖으로 나가지 않는다', () {
+      c.addMembers(['가', '나', '다', '라', '마']);
+      final ga = c.state.members.first.id;
+      c.replaceConditions([
+        c.newCondition([])
+          ..type = ConditionType.only
+          ..memberIds.add(ga)
+          ..slots.addAll({'B:39', 'B:38'}),
+      ]);
+      for (var round = 0; round < 20; round++) {
+        c.shuffle();
+        c.skipReveal();
+        expect({'B:39', 'B:38'}.contains(c.slotOf(ga)), isTrue);
+      }
+    });
+
+    test('칸이 모자라도 조건 있는 사람이 밀려나지 않는다', () {
+      c.updateBanks([const BankEdit(id: 'A', name: 'A', cols: 2, rows: 2)]);
+      c.addMembers(['가', '나', '다', '라', '마', '바']);
+      final ga = c.state.members.first.id;
+      c.replaceConditions([
+        c.newCondition([])
+          ..type = ConditionType.only
+          ..memberIds.add(ga)
+          ..slots.add('A:3'),
+      ]);
+      for (var round = 0; round < 20; round++) {
+        final report = c.shuffle();
+        c.skipReveal();
+        expect(c.slotOf(ga), 'A:3');
+        expect(report.limitedByConditions, isFalse);
+      }
+    });
+
+    test('조건 때문에 자리가 없으면 알려 준다', () {
+      c.addMembers(['가', '나']);
+      final ga = c.state.members.first.id;
+      c.replaceConditions([
+        c.newCondition([])
+          ..type = ConditionType.only
+          ..memberIds.add(ga)
+          ..slots.add('A:3'),
+      ]);
+      c.toggleDisabled('A:3');
+      final report = c.shuffle();
+      c.skipReveal();
+      expect(report.leftOver.map((m) => m.id), [ga]);
+      expect(report.limitedByConditions, isTrue);
+    });
+
+    test('앞 번호부터 + 조건 — 막힌 앞 칸은 건너뛴다', () {
+      c.setFillMode(FillMode.sequential);
+      c.addMembers(['가', '나', '다']);
+      final ids = c.state.members.map((m) => m.id).toSet();
+      c.replaceConditions([
+        c.newCondition([])
+          ..memberIds.addAll(ids)
+          ..slots.add('A:0'),
+      ]);
+      c.shuffle();
+      c.skipReveal();
+      expect(c.state.assignments.keys.toSet(), {'A:1', 'A:2', 'A:3'});
+    });
+
+    test('신발장 크기를 바꾸면 조건의 자리도 따라 옮긴다', () {
+      c.replaceConditions([c.newCondition([])..slots.addAll({'A:5', 'A:3'})]);
+      c.updateBanks([
+        const BankEdit(id: 'A', name: 'A', cols: 3, rows: 7),
+        const BankEdit(id: 'B', name: 'B', cols: 5, rows: 8),
+      ]);
+      // A:5 (2행 2열) → A:4, A:3 (1행 4열) 은 잘려 나간다
+      expect(c.state.conditions.single.slots, {'A:4'});
+    });
+
+    test('멤버를 지우면 조건에서도 빠진다', () {
+      c.addMembers(['가']);
+      final ga = c.state.members.first.id;
+      c.replaceConditions([c.newCondition([])..memberIds.add(ga)]);
+      c.removeMember(ga);
+      expect(c.state.conditions.single.memberIds, isEmpty);
+    });
+  });
+
   test('되돌리기', () {
     c.addMembers(['가', '나']);
     c.shuffle();

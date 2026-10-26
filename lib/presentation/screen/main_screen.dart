@@ -10,6 +10,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/utils/win_file_dialog.dart';
 import '../../main.dart';
 import '../controller/locker_controller.dart';
+import '../widget/condition_dialog.dart';
 import '../widget/locker_board.dart';
 import '../widget/member_panel.dart';
 import '../widget/settings_dialog.dart';
@@ -59,13 +60,13 @@ class _MainScreenState extends State<MainScreen> {
         showDialog<void>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('칸이 모자랍니다'),
+            title: Text(report.limitedByConditions ? '조건에 맞는 자리가 없습니다' : '칸이 모자랍니다'),
             content: SizedBox(
               width: 380,
               child: Text(
                 '${report.leftOver.length}명은 칸을 받지 못했습니다.\n\n'
                 '${report.leftOver.map((m) => m.name).join(', ')}\n\n'
-                '신발장 설정에서 칸을 늘리거나, 배치에서 제외할 사람을 정해 주세요.',
+                '${report.limitedByConditions ? '배치 조건에서 제외한 자리가 너무 많거나, 조건끼리 겹치지 않는지 확인해 주세요.' : '신발장 설정에서 칸을 늘리거나, 배치에서 제외할 사람을 정해 주세요.'}',
               ),
             ),
             actions: [
@@ -280,6 +281,19 @@ class _TopBar extends StatelessWidget {
             ],
             icon: const Icon(Icons.ios_share_rounded),
           ),
+          Obx(() {
+            c.version.value;
+            final count = c.state.conditions.where((x) => x.enabled).length;
+            return TextButton.icon(
+              onPressed: () => showConditionDialog(context),
+              icon: Badge(
+                isLabelVisible: count > 0,
+                label: Text('$count'),
+                child: const Icon(Icons.rule_rounded),
+              ),
+              label: const Text('배치 조건'),
+            );
+          }),
           IconButton(
             tooltip: '신발장 설정',
             onPressed: () => showSettingsDialog(context),
